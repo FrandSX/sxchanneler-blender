@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'SX Channeler',
     'author': 'Jani Kahrama / Secret Exit Ltd.',
-    'version': (0, 0, 1),
+    'version': (1, 0, 0),
     'blender': (3, 5, 0),
     'location': 'View3D',
     'description': 'Channel Copy Tool',
@@ -48,14 +48,6 @@ class SXCHANNELER_convert(object):
             return linLum
 
 
-    def luminance_to_color(self, value):
-        return (value, value, value, 1.0)
-
-
-    def luminance_to_alpha(self, value):
-        return (1.0, 1.0, 1.0, value)
-
-
     def srgb_to_linear(self, in_rgba):
         out_rgba = []
         for i in range(3):
@@ -86,49 +78,6 @@ class SXCHANNELER_convert(object):
         return out_rgba
 
 
-    def colors_to_values(self, colors, as_rgba=False):
-        count = len(colors) // 4
-        if as_rgba:
-            for i in range(count):
-                color = colors[(0+i*4):(4+i*4)]
-                lum = self.color_to_luminance(color, premul=False)
-                colors[(0+i*4):(4+i*4)] = [lum, lum, lum, color[3]]
-            return colors
-        else:
-            values = [None] * count
-            for i in range(count):
-                values[i] = self.color_to_luminance(colors[(0+i*4):(4+i*4)])
-            return values
-
-
-    def values_to_colors(self, values, invert=False, as_alpha=False, with_mask=False, as_tuple=False):
-        if invert:
-            values = self.invert_values(values)
-
-        count = len(values) 
-        colors = [None] * count * 4
-        for i in range(count):
-            if as_alpha:
-                colors[(0+i*4):(4+i*4)] = [1.0, 1.0, 1.0, values[i]]
-            elif with_mask:
-                alpha = 1.0 if values[i] > 0.0 else 0.0
-                colors[(0+i*4):(4+i*4)] = [values[i], values[i], values[i], alpha]
-            else:
-                colors[(0+i*4):(4+i*4)] = self.luminance_to_color(values[i])
-
-        if as_tuple:
-            rgba = [None] * count
-            for i in range(count):
-                rgba[i] = tuple(colors[(0+i*4):(4+i*4)])
-            return rgba
-        else:
-            return colors
-
-
-    def invert_values(self, values):
-        return [1.0 - value for value in values]
-
-
     def __del__(self):
         print('SX Channeler: Exiting convert')
 
@@ -142,18 +91,6 @@ class SXCHANNELER_convert(object):
 class SXCHANNELER_generate(object):
     def __init__(self):
         return None
-
-
-    def color_list(self, obj, color, masklayer=None, as_tuple=False):
-        count = len(obj.data.loops)
-        colors = [color[0], color[1], color[2], color[3]] * count
-        return self.mask_list(obj, colors, masklayer, as_tuple=as_tuple)
-
-
-    def vertex_id_list(self, obj):
-        ids = [None] * len(obj.data.vertices)
-        obj.data.vertices.foreach_get('index', ids)
-        return ids
 
 
     def empty_list(self, obj, channelcount):
@@ -174,64 +111,32 @@ class SXCHANNELER_layers(object):
     def __init__(self):
         return None
 
-    def copy_channel(self, obj, sourcelayerindex, sourcechannel, targetlayerindex, targetchannel):
-        pass
+    def copy_channel(self, obj, source_layer_index, source_channel, target_layer_index, target_channel):
+        source_layer = obj.sxchanneler_layers[source_layer_index]
+        target_layer = obj.sxchanneler_layers[target_layer_index]
+        channel_map = {'R': 0, 'G': 1, 'B': 2, 'A': 3, 'U': 0, 'V': 1}
+        source_index = channel_map[source_channel]
+        target_index = channel_map[target_channel]
 
+        if source_layer.type == 'COLOR':
+            source_colors = self.get_colors(obj, source_layer.name)
+            if source_channel == 'L':
+                source_data = generate.empty_list(obj, 1)
+                count = len(source_data)
+                for i in range(count):
+                    source_data[i] = convert.color_to_luminance(source_colors[(0+i*4):(4+i*4)])
+            else:
+                source_data = source_colors[source_index::4]
+        elif source_layer.type == 'UV':
+            source_data = self.get_uvs(obj, source_layer.name, source_channel)
 
-    # wrapper for low-level functions, always returns layerdata in RGBA
-    def get_layer(self, obj, sourcelayer, as_tuple=False, single_as_alpha=False, apply_layer_opacity=False):
-        rgba_targets = ['COLOR', 'SSS', 'EMI', 'CMP']
-        alpha_targets = {'OCC': 0, 'MET': 1, 'RGH': 2, 'TRN': 3}
-        dv = [1.0, 1.0, 1.0, 1.0]
-
-        if sourcelayer.layer_type in rgba_targets:
-            values = self.get_colors(obj, sourcelayer.color_attribute)
-
-        elif sourcelayer.layer_type in alpha_targets:
-            source_values = self.get_colors(obj, sourcelayer.color_attribute)
-            values = [None] * len(source_values)
-            for i in range(len(source_values)//4):
-                value_slice = source_values[(0+i*4):(4+i*4)]
-                value = value_slice[alpha_targets[sourcelayer.layer_type]]
-                if single_as_alpha:
-                    if value > 0.0:
-                        values[(0+i*4):(4+i*4)] = [dv[0], dv[1], dv[2], value]
-                    else:
-                        values[(0+i*4):(4+i*4)] = [0.0, 0.0, 0.0, value]
-                else:
-                    values[(0+i*4):(4+i*4)] = [value, value, value, 1.0]
-
-        if apply_layer_opacity and sourcelayer.opacity != 1.0:
-            count = len(values)//4
-            for i in range(count):
-                values[3+i*4] *= sourcelayer.opacity
-
-        if as_tuple:
-            count = len(values)//4
-            rgba = [None] * count
-            for i in range(count):
-                rgba[i] = tuple(values[(0+i*4):(4+i*4)])
-            return rgba
-
-        else:
-            return values
-
-
-    # takes RGBA buffers, converts and writes to appropriate channels
-    def set_layer(self, obj, colors, targetlayer):
-        rgba_targets = ['COLOR', 'SSS', 'EMI', 'CMP']
-        alpha_targets = {'OCC': 0, 'MET': 1, 'RGH': 2, 'TRN': 3}
-        target_type = targetlayer.layer_type
-
-        if target_type in rgba_targets:
-            layers.set_colors(obj, targetlayer.color_attribute, colors)
-
-        elif target_type in alpha_targets:
-            target_values = self.get_colors(obj, 'Alpha Materials')
-            values = layers.get_luminances(obj, sourcelayer=None, colors=colors, as_rgba=False)
-            for i in range(len(values)):
-                target_values[alpha_targets[target_type]+i*4] = values[i]
-            self.set_colors(obj, 'Alpha Materials', target_values)
+        if target_layer.type == 'COLOR':
+            target_data = self.get_colors(obj, target_layer.name)
+            for i, value in enumerate(source_data):
+                target_data[i*4+target_index] = value
+            self.set_colors(obj, target_layer.name, target_data)
+        elif target_layer.type == 'UV':
+            self.set_uvs(obj, target_layer.name, source_data, target_channel)
 
 
     def get_colors(self, obj, source_name):
@@ -245,44 +150,6 @@ class SXCHANNELER_layers(object):
         target_colors = obj.data.color_attributes[target].data
         target_colors.foreach_set('color', colors)
         obj.data.update()
-
-
-    def set_alphas(self, obj, target, values):
-        colors = self.get_colors(obj, target)
-        count = len(values)
-        for i in range(count):
-            color = colors[(0+i*4):(4+i*4)]
-            color = [color[0], color[1], color[2], values[i]]
-            colors[(0+i*4):(4+i*4)] = color
-        target_colors = obj.data.color_attributes[target].data
-        target_colors.foreach_set('color', colors)
-        obj.data.update()  
-
-
-    def get_luminances(self, obj, sourcelayer=None, colors=None, as_rgba=False, as_alpha=False):
-        if colors is None:
-            if sourcelayer is not None:
-                colors = self.get_layer(obj, sourcelayer)
-            else:
-                colors = generate.empty_list(obj, 4)
-
-        if as_rgba:
-            values = generate.empty_list(obj, 4)
-            count = len(values)//4
-            for i in range(count):
-                values[(0+i*4):(4+i*4)] = convert.luminance_to_color(convert.color_to_luminance(colors[(0+i*4):(4+i*4)]))
-        elif as_alpha:
-            values = generate.empty_list(obj, 4)
-            count = len(values)//4
-            for i in range(count):
-                values[(0+i*4):(4+i*4)] = convert.luminance_to_alpha(convert.color_to_luminance(colors[(0+i*4):(4+i*4)]))
-        else:
-            values = generate.empty_list(obj, 1)
-            count = len(values)
-            for i in range(count):
-                values[i] = convert.color_to_luminance(colors[(0+i*4):(4+i*4)])
-
-        return values
 
 
     def get_uvs(self, obj, source, channel=None):
