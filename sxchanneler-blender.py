@@ -1,7 +1,7 @@
 bl_info = {
     'name': 'SX Channeler',
     'author': 'Jani Kahrama / Secret Exit Ltd.',
-    'version': (1, 0, 0),
+    'version': (1, 0, 1),
     'blender': (3, 5, 0),
     'location': 'View3D',
     'description': 'Channel Copy Tool',
@@ -212,18 +212,19 @@ def mesh_selection_validator(self, context):
 
 
 def update_sxchanneler_layers(self, context):
-    obj = context.view_layer.objects.active
-    if obj and obj.type == 'MESH':
-        obj.sxchanneler_layers.clear()
-        for layer in obj.data.color_attributes:
-            item = obj.sxchanneler_layers.add()
-            item.name = layer.name
-            item.type = 'COLOR'
+    objs = mesh_selection_validator(self, context)
+    if objs:
+        for obj in objs:
+            obj.sxchanneler_layers.clear()
+            for layer in obj.data.color_attributes:
+                item = obj.sxchanneler_layers.add()
+                item.name = layer.name
+                item.type = 'COLOR'
 
-        for layer in obj.data.uv_layers:
-            item = obj.sxchanneler_layers.add()
-            item.name = layer.name
-            item.type = 'UV'
+            for layer in obj.data.uv_layers:
+                item = obj.sxchanneler_layers.add()
+                item.name = layer.name
+                item.type = 'UV'
 
 
 # ------------------------------------------------------------------------
@@ -349,8 +350,6 @@ class SXCHANNELER_PT_main_panel(bpy.types.Panel):
 #   Operators
 # ------------------------------------------------------------------------
 
-# The selectionmonitor tracks shading mode and selection changes,
-# triggering a refresh of palette swatches and other UI elements
 class SXCHANNELER_OT_selectionmonitor(bpy.types.Operator):
     bl_idname = 'sxchanneler.selectionmonitor'
     bl_label = 'Selection Monitor'
@@ -360,10 +359,7 @@ class SXCHANNELER_OT_selectionmonitor(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         if not bpy.app.background:
-            if (context.area is not None) and (context.area.type == 'VIEW_3D'):
-                return context.active_object is not None
-            else:
-                return False
+            return (context.area is not None) and (context.area.type == 'VIEW_3D')
         else:
             return context.active_object is not None
 
@@ -378,7 +374,7 @@ class SXCHANNELER_OT_selectionmonitor(bpy.types.Operator):
             return {'CANCELLED'}
 
         objs = mesh_selection_validator(self, context)
-        if (len(objs) == 0) and (context.active_object is not None) and (context.object.mode == 'EDIT'):
+        if objs and (context.active_object is not None) and (context.object.mode == 'EDIT'):
             objs = context.objects_in_mode
             if objs:
                 for obj in objs:
@@ -389,12 +385,10 @@ class SXCHANNELER_OT_selectionmonitor(bpy.types.Operator):
             obj = context.view_layer.objects.active
             if obj != context.scene.sxchanneler.active_object:
                 context.scene.sxchanneler.active_object = obj
-            if len(obj.sxchanneler_layers) != obj.sxchanneler.layer_count:
-                obj.sxchanneler.layer_count = len(obj.sxchanneler_layers)
 
-                return {'PASS_THROUGH'}
-            else:
-                return {'PASS_THROUGH'}
+            for obj in objs:
+                if (len(obj.data.color_attributes) + len(obj.data.uv_layers)) != obj.sxchanneler.layer_count:
+                    obj.sxchanneler.layer_count = (len(obj.data.color_attributes) + len(obj.data.uv_layers))
 
         return {'PASS_THROUGH'}
 
